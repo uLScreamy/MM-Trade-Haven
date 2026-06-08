@@ -235,3 +235,37 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.login(process.env.TOKEN);
+
+
+const prefix = '-'; // Add prefix
+
+// ... (your existing code)
+
+client.on('messageCreate', async message => {
+    // Ignore messages from bots
+    if (message.author.bot) return;
+
+    // Check for prefix
+    if (!message.content.startsWith(prefix)) return;
+
+    // Remove prefix and split into args
+    const args = message.content.slice(prefix.length).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+
+    // ... (rest of your command handling)
+
+    // For restricted commands (mm done, mm stats)
+    if (commandName === 'mm' || commandName === 'stats') {
+        const restrictedCommands = ['done', 'stats']; // Commands that require special role
+        if (restrictedCommands.includes(args[0]?.toLowerCase())) {
+            const requiredRoleId = '1444549234094247986';
+            const member = message.member;
+
+            if (!member.roles.cache.has(requiredRoleId)) {
+                return message.reply('You do not have permission to use this command!');
+            }
+        }
+    }
+
+    // ... (rest of your command handling)
+});
