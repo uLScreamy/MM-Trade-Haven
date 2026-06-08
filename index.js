@@ -237,9 +237,15 @@ client.on('interactionCreate', async interaction => {
 client.login(process.env.TOKEN);
 
 
-const prefix = '-'; // Add prefix
 
-// ... (your existing code)
+
+
+
+
+
+
+
+const prefix = '-'; // Set your prefix here
 
 client.on('messageCreate', async message => {
     // Ignore messages from bots
@@ -252,20 +258,44 @@ client.on('messageCreate', async message => {
     const args = message.content.slice(prefix.length).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
 
-    // ... (rest of your command handling)
+    // Handle commands
+    if (commandName === 'help') {
+        // Your help command logic
+    }
+    else if (commandName === 'ping') {
+        // Your ping command logic
+    }
+    else if (commandName === 'trade') {
+        // Your trade command logic
+    }
+    else if (commandName === 'market') {
+        // Your market command logic
+    }
+    else if (commandName === 'mm') {
+        // Handle 'mm' subcommands (done, stats)
+        const subCommand = args[0]?.toLowerCase();
 
-    // For restricted commands (mm done, mm stats)
-    if (commandName === 'mm' || commandName === 'stats') {
-        const restrictedCommands = ['done', 'stats']; // Commands that require special role
-        if (restrictedCommands.includes(args[0]?.toLowerCase())) {
+        if (subCommand === 'done' || subCommand === 'stats') {
             const requiredRoleId = '1444549234094247986';
             const member = message.member;
 
             if (!member.roles.cache.has(requiredRoleId)) {
-                return message.reply('You do not have permission to use this command!');
+                return message.reply('❌ You do not have permission to use this command!');
+            }
+
+            // Proceed with the command logic
+            if (subCommand === 'done') {
+                // Your 'mm done' logic
+            }
+            else if (subCommand === 'stats') {
+                // Your 'mm stats' logic
             }
         }
+        else {
+            // Handle other 'mm' subcommands (if any)
+        }
     }
-
-    // ... (rest of your command handling)
+    else {
+        message.reply('❌ Unknown command! Use `-help` for a list of commands.');
+    }
 });
