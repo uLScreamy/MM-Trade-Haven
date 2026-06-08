@@ -1,10 +1,17 @@
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,   // Required to check roles
+    GatewayIntentBits.MessageContent  // REQUIRED for prefix commands to work
+  ]
 });
 
+const prefix = '%';
+const RESTRICTED_ROLE_ID = '1444549234094247986';
 const DATA_FILE = './data.json';
 
 // Load or create data
@@ -27,7 +34,7 @@ function buildLeaderboardEmbed(middlemen) {
   const medals = ['🥇', '🥈', '🥉'];
 
   const description = sorted.length === 0
-    ? 'No deals yet! Use `/mm done` to add your first deal.'
+    ? 'No deals yet! Use `%mm done` to add your first deal.'
     : sorted.map(([id, stats], i) => {
         const medal = medals[i] || `**#${i + 1}**`;
         return `${medal} <@${id}> — **${stats.deals} deals** | 💰 $${stats.value.toLocaleString()}`;
@@ -68,234 +75,173 @@ async function updateLeaderboard(guild) {
   }
 }
 
-// Slash commands definition
-const commands = [
-  new SlashCommandBuilder()
-    .setName('mm')
-    .setDescription('Middleman commands')
-    .addSubcommand(sub =>
-      sub.setName('done')
-        .setDescription('Log a completed MM deal')
-        .addUserOption(opt => opt.setName('middleman').setDescription('The middleman who completed the deal').setRequired(true))
-        .addIntegerOption(opt => opt.setName('value').setDescription('Value of the deal in $').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('remove')
-        .setDescription('Remove a deal from a middleman')
-        .addUserOption(opt => opt.setName('middleman').setDescription('The middleman').setRequired(true))
-        .addIntegerOption(opt => opt.setName('value').setDescription('Value to remove').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('stats')
-        .setDescription('Check stats of a middleman')
-        .addUserOption(opt => opt.setName('middleman').setDescription('The middleman').setRequired(false))
-    )
-    .addSubcommand(sub =>
-      sub.setName('setchannel')
-        .setDescription('Set the leaderboard channel (Admin only)')
-        .addChannelOption(opt => opt.setName('channel').setDescription('The channel to post the leaderboard in').setRequired(true))
-    )
-    .addSubcommand(sub =>
-      sub.setName('reset')
-        .setDescription('Reset a middleman\'s stats (Admin only)')
-        .addUserOption(opt => opt.setName('middleman').setDescription('The middleman to reset').setRequired(true))
-    ),
-].map(cmd => cmd.toJSON());
-
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
-  // Register slash commands
-  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-  try {
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ Slash commands registered');
-  } catch (err) {
-    console.error('Error registering commands:', err);
-  }
 });
 
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== 'mm') return;
+client.on('messageCreate', async message => {
+  // Ignore bots, DMs, and messages without prefix
+  if (message.author.bot) return;
+  if (!message.guild) return;
+  if (!message.content.startsWith(prefix)) return;
 
-  const sub = interaction.options.getSubcommand();
+  const args = message.content.slice(prefix.length).trim().split(/ +/);
+  const command = args.shift()?.toLowerCase();
 
-  // Defer reply immediately to prevent Discord 3s timeout
-  const ephemeralSubs = ['remove', 'setchannel', 'reset'];
-  await interaction.deferReply({ ephemeral: ephemeralSubs.includes(sub) });
-
-  const data = loadData();
-
-  // --- DONE ---
-  if (sub === 'done') {
-    const mm = interaction.options.getUser('middleman');
-    const value = interaction.options.getInteger('value');
-
-    if (!data.middlemen[mm.id]) {
-      data.middlemen[mm.id] = { deals: 0, value: 0 };
-    }
-    data.middlemen[mm.id].deals += 1;
-    data.middlemen[mm.id].value += value;
-    saveData(data);
-
-    await updateLeaderboard(interaction.guild);
-
+  // --- HELP ---
+  if (command === 'help') {
     const embed = new EmbedBuilder()
-      .setTitle('✅ Deal Logged!')
-      .setDescription(`<@${mm.id}> completed a deal worth **$${value.toLocaleString()}**`)
+      .setTitle('📋 Command List')
+      .setDescription('Here are all available commands:')
       .addFields(
-        { name: 'Total Deals', value: `${data.middlemen[mm.id].deals}`, inline: true },
-        { name: 'Total Value', value: `$${data.middlemen[mm.id].value.toLocaleString()}`, inline: true }
+        { name: '%mm done @user <value>', value: 'Log a completed deal (Restricted Role only)' },
+        { name: '%mm stats [@user]', value: 'Check middleman stats (Restricted Role only)' },
+        { name: '%mm remove @user <value>', value: 'Remove a deal (Admin only)' },
+        { name: '%mm setchannel #channel', value: 'Set leaderboard channel (Admin only)' },
+        { name: '%mm reset @user', value: 'Reset user stats (Admin only)' },
+        { name: '%help', value: 'Show this message' }
       )
-      .setColor(0x00FF88)
-      .setTimestamp();
-
-    await interaction.editReply({ embeds: [embed] });
+      .setColor(0x5865F2);
+    return message.reply({ embeds: [embed] });
   }
 
-  // --- REMOVE ---
-  else if (sub === 'remove') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.reply({ content: '❌ You need **Manage Server** permission to use this.', ephemeral: true });
+  // --- MM COMMANDS ---
+  if (command === 'mm') {
+    const sub = args.shift()?.toLowerCase();
+    if (!sub) return message.reply('❌ Usage: `%mm <done|stats|remove|setchannel|reset>`');
+
+    const data = loadData();
+
+    // --- DONE ---
+    if (sub === 'done') {
+      // Check restricted role
+      if (!message.member.roles.cache.has(RESTRICTED_ROLE_ID)) {
+        return message.reply('❌ You do not have permission to use this command!');
+      }
+
+      const user = message.mentions.users.first();
+      const value = parseInt(args.find(arg => !isNaN(arg)), 10);
+
+      if (!user) return message.reply('❌ Please mention a middleman. Example: `%mm done @user 100`');
+      if (isNaN(value)) return message.reply('❌ Please provide a valid deal value. Example: `%mm done @user 100`');
+
+      if (!data.middlemen[user.id]) {
+        data.middlemen[user.id] = { deals: 0, value: 0 };
+      }
+      data.middlemen[user.id].deals += 1;
+      data.middlemen[user.id].value += value;
+      saveData(data);
+
+      await updateLeaderboard(message.guild);
+
+      const embed = new EmbedBuilder()
+        .setTitle('✅ Deal Logged!')
+        .setDescription(`<@${user.id}> completed a deal worth **$${value.toLocaleString()}**`)
+        .addFields(
+          { name: 'Total Deals', value: `${data.middlemen[user.id].deals}`, inline: true },
+          { name: 'Total Value', value: `$${data.middlemen[user.id].value.toLocaleString()}`, inline: true }
+        )
+        .setColor(0x00FF88)
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
     }
 
-    const mm = interaction.options.getUser('middleman');
-    const value = interaction.options.getInteger('value');
+    // --- STATS ---
+    else if (sub === 'stats') {
+      // Check restricted role
+      if (!message.member.roles.cache.has(RESTRICTED_ROLE_ID)) {
+        return message.reply('❌ You do not have permission to use this command!');
+      }
 
-    if (!data.middlemen[mm.id]) {
-      return interaction.reply({ content: `❌ <@${mm.id}> has no deals logged.`, ephemeral: true });
+      const user = message.mentions.users.first() || message.author;
+      const stats = data.middlemen[user.id];
+
+      if (!stats) {
+        return message.reply(`❌ <@${user.id}> has no deals logged yet.`);
+      }
+
+      const allSorted = Object.entries(data.middlemen).sort((a, b) => b[1].deals - a[1].deals);
+      const rank = allSorted.findIndex(([id]) => id === user.id) + 1;
+
+      const embed = new EmbedBuilder()
+        .setTitle(`📊 Stats for ${user.username}`)
+        .setThumbnail(user.displayAvatarURL())
+        .addFields(
+          { name: '🏆 Rank', value: `#${rank}`, inline: true },
+          { name: '🤝 Deals', value: `${stats.deals}`, inline: true },
+          { name: '💰 Total Value', value: `$${stats.value.toLocaleString()}`, inline: true }
+        )
+        .setColor(0x5865F2)
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
     }
 
-    data.middlemen[mm.id].deals = Math.max(0, data.middlemen[mm.id].deals - 1);
-    data.middlemen[mm.id].value = Math.max(0, data.middlemen[mm.id].value - value);
-    saveData(data);
+    // --- REMOVE ---
+    else if (sub === 'remove') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return message.reply('❌ You need **Manage Server** permission to use this.');
+      }
 
-    await updateLeaderboard(interaction.guild);
+      const user = message.mentions.users.first();
+      const value = parseInt(args.find(arg => !isNaN(arg)), 10);
 
-    await interaction.editReply({ content: `✅ Removed 1 deal ($${value.toLocaleString()}) from <@${mm.id}>`, ephemeral: true });
-  }
+      if (!user) return message.reply('❌ Please mention a middleman. Example: `%mm remove @user 100`');
+      if (isNaN(value)) return message.reply('❌ Please provide a valid value. Example: `%mm remove @user 100`');
 
-  // --- STATS ---
-  else if (sub === 'stats') {
-    const mm = interaction.options.getUser('middleman') || interaction.user;
-    const stats = data.middlemen[mm.id];
+      if (!data.middlemen[user.id]) {
+        return message.reply(`❌ <@${user.id}> has no deals logged.`);
+      }
 
-    if (!stats) {
-      return interaction.reply({ content: `❌ <@${mm.id}> has no deals logged yet.`, ephemeral: true });
+      data.middlemen[user.id].deals = Math.max(0, data.middlemen[user.id].deals - 1);
+      data.middlemen[user.id].value = Math.max(0, data.middlemen[user.id].value - value);
+      saveData(data);
+
+      await updateLeaderboard(message.guild);
+
+      return message.reply(`✅ Removed 1 deal ($${value.toLocaleString()}) from <@${user.id}>`);
     }
 
-    const allSorted = Object.entries(data.middlemen).sort((a, b) => b[1].deals - a[1].deals);
-    const rank = allSorted.findIndex(([id]) => id === mm.id) + 1;
+    // --- SETCHANNEL ---
+    else if (sub === 'setchannel') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return message.reply('❌ You need **Manage Server** permission to use this.');
+      }
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📊 Stats for ${mm.username}`)
-      .setThumbnail(mm.displayAvatarURL())
-      .addFields(
-        { name: '🏆 Rank', value: `#${rank}`, inline: true },
-        { name: '🤝 Deals', value: `${stats.deals}`, inline: true },
-        { name: '💰 Total Value', value: `$${stats.value.toLocaleString()}`, inline: true }
-      )
-      .setColor(0x5865F2)
-      .setTimestamp();
+      const channel = message.mentions.channels.first();
+      if (!channel) return message.reply('❌ Please mention a channel. Example: `%mm setchannel #leaderboard`');
 
-    await interaction.editReply({ embeds: [embed] });
-  }
+      data.leaderboardChannel = channel.id;
+      data.leaderboardMessage = null;
+      saveData(data);
 
-  // --- SETCHANNEL ---
-  else if (sub === 'setchannel') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.reply({ content: '❌ You need **Manage Server** permission to use this.', ephemeral: true });
+      await updateLeaderboard(message.guild);
+
+      return message.reply(`✅ Leaderboard channel set to <#${channel.id}>!`);
     }
 
-    const channel = interaction.options.getChannel('channel');
-    data.leaderboardChannel = channel.id;
-    data.leaderboardMessage = null;
-    saveData(data);
+    // --- RESET ---
+    else if (sub === 'reset') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return message.reply('❌ You need **Manage Server** permission to use this.');
+      }
 
-    await updateLeaderboard(interaction.guild);
+      const user = message.mentions.users.first();
+      if (!user) return message.reply('❌ Please mention a middleman. Example: `%mm reset @user`');
 
-    await interaction.editReply({ content: `✅ Leaderboard channel set to <#${channel.id}>!`, ephemeral: true });
-  }
+      delete data.middlemen[user.id];
+      saveData(data);
 
-  // --- RESET ---
-  else if (sub === 'reset') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.reply({ content: '❌ You need **Manage Server** permission to use this.', ephemeral: true });
+      await updateLeaderboard(message.guild);
+
+      return message.reply(`✅ Reset stats for <@${user.id}>`);
     }
 
-    const mm = interaction.options.getUser('middleman');
-    delete data.middlemen[mm.id];
-    saveData(data);
-
-    await updateLeaderboard(interaction.guild);
-
-    await interaction.editReply({ content: `✅ Reset stats for <@${mm.id}>`, ephemeral: true });
+    else {
+      return message.reply('❌ Unknown subcommand. Use `%mm <done|stats|remove|setchannel|reset>`');
+    }
   }
 });
 
 client.login(process.env.TOKEN);
-
-
-
-
-
-
-
-
-
-
-const prefix = '-'; // Set your prefix here
-
-client.on('messageCreate', async message => {
-    // Ignore messages from bots
-    if (message.author.bot) return;
-
-    // Check for prefix
-    if (!message.content.startsWith(prefix)) return;
-
-    // Remove prefix and split into args
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    // Handle commands
-    if (commandName === 'help') {
-        // Your help command logic
-    }
-    else if (commandName === 'ping') {
-        // Your ping command logic
-    }
-    else if (commandName === 'trade') {
-        // Your trade command logic
-    }
-    else if (commandName === 'market') {
-        // Your market command logic
-    }
-    else if (commandName === 'mm') {
-        // Handle 'mm' subcommands (done, stats)
-        const subCommand = args[0]?.toLowerCase();
-
-        if (subCommand === 'done' || subCommand === 'stats') {
-            const requiredRoleId = '1444549234094247986';
-            const member = message.member;
-
-            if (!member.roles.cache.has(requiredRoleId)) {
-                return message.reply('❌ You do not have permission to use this command!');
-            }
-
-            // Proceed with the command logic
-            if (subCommand === 'done') {
-                // Your 'mm done' logic
-            }
-            else if (subCommand === 'stats') {
-                // Your 'mm stats' logic
-            }
-        }
-        else {
-            // Handle other 'mm' subcommands (if any)
-        }
-    }
-    else {
-        message.reply('❌ Unknown command! Use `-help` for a list of commands.');
-    }
-});
