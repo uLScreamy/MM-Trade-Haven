@@ -120,6 +120,11 @@ client.on('interactionCreate', async interaction => {
   if (interaction.commandName !== 'mm') return;
 
   const sub = interaction.options.getSubcommand();
+
+  // Defer reply immediately to prevent Discord 3s timeout
+  const ephemeralSubs = ['remove', 'setchannel', 'reset'];
+  await interaction.deferReply({ ephemeral: ephemeralSubs.includes(sub) });
+
   const data = loadData();
 
   // --- DONE ---
@@ -146,7 +151,7 @@ client.on('interactionCreate', async interaction => {
       .setColor(0x00FF88)
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 
   // --- REMOVE ---
@@ -168,7 +173,7 @@ client.on('interactionCreate', async interaction => {
 
     await updateLeaderboard(interaction.guild);
 
-    await interaction.reply({ content: `✅ Removed 1 deal ($${value.toLocaleString()}) from <@${mm.id}>`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Removed 1 deal ($${value.toLocaleString()}) from <@${mm.id}>`, ephemeral: true });
   }
 
   // --- STATS ---
@@ -194,7 +199,7 @@ client.on('interactionCreate', async interaction => {
       .setColor(0x5865F2)
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 
   // --- SETCHANNEL ---
@@ -210,7 +215,7 @@ client.on('interactionCreate', async interaction => {
 
     await updateLeaderboard(interaction.guild);
 
-    await interaction.reply({ content: `✅ Leaderboard channel set to <#${channel.id}>!`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Leaderboard channel set to <#${channel.id}>!`, ephemeral: true });
   }
 
   // --- RESET ---
@@ -225,7 +230,7 @@ client.on('interactionCreate', async interaction => {
 
     await updateLeaderboard(interaction.guild);
 
-    await interaction.reply({ content: `✅ Reset stats for <@${mm.id}>`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Reset stats for <@${mm.id}>`, ephemeral: true });
   }
 });
 
